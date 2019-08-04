@@ -67,7 +67,6 @@
  Required
  Provide the Message body to send to a user before forcing logoff
 
-
 #>
 param(
     [Parameter(mandatory = $true)]
@@ -136,11 +135,79 @@ param(
     $WebhookName = "WVDAutoScaleWebhook"
     $AzureADApplicationName = "WVDAutoScaleAutomationAccountSvcPrnicipal"
     $CredentialsAssetName = "WVDAutoScaleSvcPrincipalAsset"
-    $RequiredModules = "Az.Accounting","Microsoft.RDInfra.RDPowershell","OMSIngestionAPI","Az.Compute","Az.Resources","Az.OperationalInsights","Az.Automation"
+    $RequiredModules = @("Az.Accounts","Microsoft.RDInfra.RDPowershell","OMSIngestionAPI","Az.Compute","Az.Resources","Az.OperationalInsights","Az.Automation")
     $RDBrokerURL = "https://rdbroker.wvd.microsoft.com"
     
-    $ScriptRepoLocation = ""
-    #Authenticate to AzureRm
+    $ScriptRepoLocation = "https://raw.githubusercontent.com/Azure/RDS-Templates/ptg-wvdautoscaling-automation/wvd-templates/wvd-scaling-script/wvdscaling-automation"
+  
+
+    #Function to add Required modules to Azure Automation account
+    function AddingModules-toAutomationAccount{ 
+    param(
+    [Parameter(Mandatory=$true)]
+    [String] $ResourceGroupName,
+ 
+    [Parameter(Mandatory=$true)]
+    [String] $AutomationAccountName,
+     
+    [Parameter(Mandatory=$true)]
+    [String] $ModuleName,
+ 
+    # if not specified latest version will be imported
+    [Parameter(Mandatory=$false)]
+    [String] $ModuleVersion
+)
+ 
+
+$Url = "https://www.powershellgallery.com/api/v2/Search()?`$filter=IsLatestVersion&searchTerm=%27$ModuleName $ModuleVersion%27&targetFramework=%27%27&includePrerelease=false&`$skip=0&`$top=40"
+
+$SearchResult = Invoke-RestMethod -Method Get -Uri $Url
+if($SearchResult.count -ne 1){
+$SearchResult = $SearchResult[0]
+}
+ 
+if(!$SearchResult) {
+    Write-Error "Could not find module '$ModuleName' on PowerShell Gallery."
+}
+elseif($SearchResult.Count -and $SearchResult.Length -gt 1) {
+    Write-Error "Module name '$ModuleName' returned multiple results. Please specify an exact module name."
+}
+else {
+    $PackageDetails = Invoke-RestMethod -Method Get -Uri $SearchResult.id 
+     
+    if(!$ModuleVersion) {
+        $ModuleVersion = $PackageDetails.entry.properties.version
+    }
+ 
+    $ModuleContentUrl = "https://www.powershellgallery.com/api/v2/package/$ModuleName/$ModuleVersion"
+ 
+    # Test if the module/version combination exists
+    try {
+        Invoke-RestMethod $ModuleContentUrl -ErrorAction Stop | Out-Null
+        $Stop = $False
+    }
+    catch {
+        Write-Error "Module with name '$ModuleName' of version '$ModuleVersion' does not exist. Are you sure the version specified is correct?"
+        $Stop = $True
+    }
+ 
+    if(!$Stop) {
+ 
+        # Find the actual blob storage location of the module
+        do {
+            $ActualUrl = $ModuleContentUrl
+            $ModuleContentUrl = (Invoke-WebRequest -Uri $ModuleContentUrl -MaximumRedirection 0 -ErrorAction Ignore).Headers.Location 
+        } while($ModuleContentUrl -ne $Null)
+ 
+        New-AzureRmAutomationModule `
+            -ResourceGroupName $ResourceGroupName `
+            -AutomationAccountName $AutomationAccountName `
+            -Name $ModuleName `
+            -ContentLink $ActualUrl
+    }
+}
+}
+  #Authenticate to AzureRm
     try{
      Login-AzureRmAccount -Subscription $SubscriptionId -Credential $TenantAdminCredentials
     }
@@ -148,15 +215,11 @@ param(
     $_.Exception
     }
 
+    #Convert to local time to UTC time
     $CurrentDateTime = Get-Date
     $CurrentDateTime=$CurrentDateTime.ToUniversalTime()
 
-    $TimeDifferenceInHours = $TimeDifference.Split(":")[0]
-    $TimeDifferenceInMinutes = $TimeDifference.Split(":")[1]
-    #Azure is using UTC time, justify it to the local time
-    $CurrentDateTime = $CurrentDateTime.AddHours($TimeDifferenceInHours).AddMinutes($TimeDifferenceInMinutes)
-
-
+   
     #Check If the resourcegroup exist
     $ResourceGroup = Get-AzureRmResourceGroup -Name $ResourceGroupName -Location $Location -ErrorAction SilentlyContinue
     if(!$ResourceGroup){
@@ -198,7 +261,7 @@ param(
         $Runbook = Get-AzureRmAutomationRunbook -Name $RunbookName -ResourceGroupName $ResourceGroupName -AutomationAccountName $AutomationAccountName -ErrorAction SilentlyContinue
         if($Runbook -eq $null){
         #Creating a runbook and published the basic Scale script file
-        $DeploymentStatus = New-AzureRmResourceGroupDeployment -ResourceGroupName $ResourceGroupName -TemplateUri "$ScriptRepoLocation/runbookCreationTemplate.Json" -DeploymentDebugLogLevel All -existingAutomationAccountName $AutomationAccountName -runbookName $RunbookName -Force -Verbose
+        $DeploymentStatus = New-AzureRmResourceGroupDeployment -ResourceGroupName $ResourceGroupName -TemplateUri "$ScriptRepoLocation/RunbookCreationTemplate.Json" -DeploymentDebugLogLevel All -existingAutomationAccountName $AutomationAccountName -runbookName $RunbookName -Force -Verbose
         if($DeploymentStatus.ProvisioningState -eq "Succeeded"){
         $WebhookURI = Get-AzureRmAutomationVariable -Name "WebhookURI" -ResourceGroupName $ResourceGroupName -AutomationAccountName $AutomationAccountName -ErrorAction SilentlyContinue
         if(!$WebhookURI){
@@ -210,69 +273,12 @@ param(
         }
         }
     # Required modules imported from Automation Account Modules gallery for Scale Script execution
-    $RequiredModulessplt = $RequiredModules.Split(",")
-    foreach($ModuleName in $RequiredModules)
- {
-    If(ModuleName -eq "Az.Compute"){
-        $ModuleVersion = "2.4.1"
+    foreach($ModuleName in $RequiredModules){
+    AddingModules-toAutomationAccount -ResourceGroupName "WVDAutoScaleResourceGroup" -AutomationAccountName "WVDAutoScaleAutomatinAccount" -ModuleName $ModuleName
+    if($Module -eq "Az.Accounts"){
+    Start-Sleep -Seconds 40
     }
-    #Check if Module is imported
-    $RequiredModule = Get-AzureRmAutomationModule -Name $ModuleName -ResourceGroupName $ResourceGroupName -AutomationAccountName $AutomationAccountName -ErrorAction SilentlyContinue
-    if($RequiredModule -eq $null){
-    $Url = "https://www.powershellgallery.com/api/v2/Search()?`$filter=IsLatestVersion&searchTerm=%27$ModuleName $ModuleVersion%27&targetFramework=%27%27&includePrerelease=false&`$skip=0&`$top=40"
-    $SearchResult = Invoke-RestMethod -Method Get -Uri $Url
- 
-    if(!$SearchResult) {
-        Write-Error "Could not find module '$ModuleName' on PowerShell Gallery."
     }
-    elseif($SearchResult.C -and $SearchResult.Length -gt 1) {
-        Write-Error "Module name '$ModuleName' returned multiple results. Please specify an exact module name."
-    }
-    else {
-        $PackageDetails = Invoke-RestMethod -Method Get -Uri $SearchResult.id 
-     
-        if(!$ModuleVersion) {
-            $ModuleVersion = $PackageDetails.entry.properties.version
-        }
- 
-        $ModuleContentUrl = "https://www.powershellgallery.com/api/v2/package/$ModuleName/$ModuleVersion"
- 
-        # If the module/version combination exists
-        try {
-            Invoke-RestMethod $ModuleContentUrl -ErrorAction Stop | Out-Null
-            $Stop = $False
-        }
-        catch {
-            Write-Error "Module with name '$ModuleName' of version '$ModuleVersion' does not exist. Are you sure the version specified is correct?"
-            $Stop = $True
-        }
- 
-        if(!$Stop) {
- 
-            # Find the actual blob storage location of the module
-            do {
-                $ActualUrl = $ModuleContentUrl
-                $ModuleContentUrl = (Invoke-WebRequest -Uri $ModuleContentUrl -MaximumRedirection 0 -ErrorAction Ignore).Headers.Location 
-            } while($ModuleContentUrl -ne $Null)
- 
-            New-AzureRmAutomationModule `
-                -ResourceGroupName $ResourceGroupName `
-                -AutomationAccountName $AutomationAccountName `
-                -Name $ModuleName `
-                -ContentLink $ActualUrl
-        }
-       }
-    }
-        #Check if the Module is imported in Automation Account
-        $ProvisioningState = $false
-              while (!$ProvisioningState) {
-                $InstalledModule = Get-AzureRmAutomationModule -ResourceGroupName $ResourceGroupName -AutomationAccountName $AutomationAccountName -Name $ModuleName
-                if ($InstalledModule.ProvisioningState -eq "Succeeded") {
-                  $ProvisioningState = $true
-                }
-              }
-}
-
    
     #Check if the log analytic workspace is exist
     $LAWorkspace = Get-AzureRmOperationalInsightsWorkspace | Where-Object {$_.Name -eq $WorkspaceName}
@@ -387,4 +393,4 @@ $RequestBody = @{
 "LogOffMessageBody"=$LogOffMessageBody}
 $RequestBodyJson = $RequestBody | ConvertTo-Json
 $HostpoolName = $HostpoolName.Replace(' ','')
-$SchedulerDeployment = New-AzureRmResourceGroupDeployment -ResourceGroupName $ResourceGroupName -TemplateUri "$ScriptRepoLocation/azureScheduler.json" -JobCollectionName $JobCollectionName -ActionURI $WebhookURI.Value -JobName $HostpoolName-Job -StartTime $CurrentDateTime -EndTime Never -RecurrenceInterval $RecurrenceInterval -ActionSettingsBody $RequestBodyJson -DeploymentDebugLogLevel All -Verbose
+$SchedulerDeployment = New-AzureRmResourceGroupDeployment -ResourceGroupName $ResourceGroupName -TemplateUri "$ScriptRepoLocation/AzureScheduler.json" -JobCollectionName $JobCollectionName -ActionURI $WebhookURI.Value -JobName $HostpoolName-Job -StartTime $CurrentDateTime -EndTime Never -RecurrenceInterval $RecurrenceInterval -ActionSettingsBody $RequestBodyJson -DeploymentDebugLogLevel All -Verbose

@@ -48,7 +48,21 @@ Set-ExecutionPolicy -ExecutionPolicy Unrestricted -Scope LocalMachine -Force -Co
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-$ErrorActionPreference = "Stop"
+#Collect the credentials from Azure Automation Account Assets
+$Credentials = Get-AutomationPSCredential -Name $CredentialAssetName
+
+
+#Authenticating to Azure
+Add-AzAccount -Credential $Credentials -TenantId $AADTenantId -SubscriptionID $SubscriptionID -ServicePrincipal
+
+#Authenticating to WVD
+Add-RdsAccount -DeploymentUrl $RDBrokerURL -Credential $Credentials -TenantId $AADTenantId -ServicePrincipal
+
+
+Clear-AzContext
+#Authenticating to Azure
+Connect-AzAccount -Credential $Credentials -TenantId $AADTenantId -SubscriptionID $SubscriptionID -ServicePrincipal
+
 <#
 .Description
 Helper functions
@@ -740,15 +754,6 @@ function OffPeakUserSessionUsage-SpinUpSessionHost{
 }
 
 
-#Collect the credentials from Azure Automation Account Assets
-$Credentials = Get-AutomationPSCredential -Name $CredentialAssetName
-
-
-#Authenticating to Azure
-Add-AzAccount -Credential $Credentials -TenantId $AADTenantId -SubscriptionID $SubscriptionID #-ServicePrincipal
-
-#Authenticating to WVD
-Add-RdsAccount -DeploymentUrl $RDBrokerURL -Credential $Credentials #-TenantId $AADTenantId -ServicePrincipal
 
 #Converting date time from UTC to Local
 $CurrentDateTime = Convert-UTCtoLocalTime -TimeDifferenceInHours $TimeDifference
