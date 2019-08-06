@@ -2,43 +2,43 @@
         "$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
         "contentVersion": "1.0.0.0",
         "parameters": {
-            "JobCollectionName": {
+            "jobCollectionName": {
                 "type": "string",
                 "metadata": {
                     "description": "The name of the job collection"
                 }
             },
-            "ActionURI": {
+            "actionURI": {
                 "type": "string",
                 "metadata": {
                     "description": "Action uri (Note: Url must start with a https:// or http:// and contains rest of the url.)"
                 }
             },
-            "JobName": {
+            "jobName": {
                 "type": "string",
                 "metadata": {
                     "description": "Job Name"
                 }
             },
-            "StartTime": {
+            "startTime": {
                 "type": "string",
                 "metadata": {
                     "description": "Specifies the start time of the job"
                 }
             },
-            "EndTime": {
+            "endTime": {
                 "type": "string",
                 "metadata": {
                     "description": "Specifies the end time of the job"
                 }
             },
-            "RecurrenceInterval": {
+            "recurrenceInterval": {
                 "type": "string",
                 "metadata": {
                     "description": "Specifies the recurrence interval of the job in minutes"
                 }
             },
-            "ActionSettingsBody": {
+            "actionSettingsBody": {
                 "type": "string",
                 "metadata": {
                     "description": "Specifies the body in Action settings ('Note': Input should be in json format)"
