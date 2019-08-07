@@ -26,7 +26,7 @@
             "metadata": {
                 "description": "The sasToken required to access _artifactsLocation when they're located in a storage account with private access."
             },
-            "defaultValue": "https://raw.githubusercontent.com/Azure/RDS-Templates/ptg-wvdautoscaling-automation/wvd-templates/wvd-scaling-script/wvdscaling-automation/"
+            "defaultValue": ""
         }
     },
     "variables": {
