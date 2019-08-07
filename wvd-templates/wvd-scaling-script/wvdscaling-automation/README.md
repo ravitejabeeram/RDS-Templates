@@ -6,5 +6,4 @@ This scaledeployment script will create the auto scale script execution required
 - Log Analytic Workspace Custom Tables and Field Names.
 - Azure SchedulerJob.
 
-
 Copy or download the **scaledeployment.ps1** script file to your local machine and then run the powershell script in administrator mode.
