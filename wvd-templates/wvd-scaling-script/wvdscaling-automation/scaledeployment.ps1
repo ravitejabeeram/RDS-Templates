@@ -5,8 +5,8 @@
 	This sample script will create the scale script execution required resources in Microsoft Azure. Resources are resourcegroup,automation account,automation account runbook, 
     automation account webhook, workspace customtables and fieldnames, azure schedulerjob.
     Run this PowerShell script in adminstrator mode
-    This script depends on two PowerShell modules: AzureRM and AzureAD . To install AzureRM and AzureAD modules execute the following commands. Use "-AllowClobber" parameter if you have more than one version of PowerShell modules installed.
-	PS C:\>Install-Module AzureRM  -AllowClobber
+    This script depends on two PowerShell modules: AzureRm and AzureAD . To install AzureRm and AzureAD modules execute the following commands. Use "-AllowClobber" parameter if you have more than one version of PowerShell modules installed.
+	PS C:\>Install-Module AzureRm  -AllowClobber
     PS C:\>Install-Module AzureAD  -AllowClobber
 
 .PARAMETER TenantAdminCredentials
@@ -21,7 +21,7 @@
 .PARAMETER HostpoolName
  Required
  Provide the name of the WVD Host Pool.
-.PARAMETER peakLoadBalancingType
+.PARAMETER PeakLoadBalancingType
  Required
  Provide the peakLoadBalancingType. Hostpool session Load Balancing Type in Peak Hours.
 .PARAMETER RecurrenceInterval
@@ -82,7 +82,7 @@ param(
 	[string]$HostpoolName,
 
 	[Parameter(Mandatory = $True)]
-	[string]$peakLoadBalancingType,
+	[string]$PeakLoadBalancingType,
 
 	[Parameter(Mandatory = $True)]
 	[int]$RecurrenceInterval,
@@ -117,7 +117,7 @@ param(
 	[Parameter(Mandatory = $True)]
 	[int]$LimitSecondsToForceLogOffUser,
 
-	[Parameter(Mandatory = $True)]
+	[Parameter(Mandatory = $False)]
 	[string]$Location = "South Central US",
 
 	[Parameter(Mandatory = $True)]
@@ -129,13 +129,13 @@ param(
 
 #Initializing variables
 $ResourceGroupName = "WVDAutoScaleResourceGroup"
-$AutomationAccountName = "WVDAutoScaleAutomatinAccount"
+$AutomationAccountName = "WVDAutoScaleAutomationAccount"
 $JobCollectionName = "WVDAutoScaleSchedulerJobCollection"
 $RunbookName = "WVDAutoScaleRunbook"
 $WebhookName = "WVDAutoScaleWebhook"
 $AzureADApplicationName = "WVDAutoScaleAutomationAccountSvcPrnicipal"
 $CredentialsAssetName = "WVDAutoScaleSvcPrincipalAsset"
-$RequiredModules = @("Az.Accounts","Microsoft.RDInfra.RDPowershell","OMSIngestionAPI","Az.Compute","Az.Resources","Az.OperationalInsights","Az.Automation","Az.Profile")
+$RequiredModules = @("Az.Accounts","Microsoft.RDInfra.RDPowershell","OMSIngestionAPI","Az.Compute","Az.Resources","Az.Automation","Az.Profile")
 $RDBrokerURL = "https://rdbroker.wvd.microsoft.com"
 
 $ScriptRepoLocation = "https://raw.githubusercontent.com/Azure/RDS-Templates/ptg-wvdautoscaling-automation/wvd-templates/wvd-scaling-script/wvdscaling-automation"
@@ -161,7 +161,7 @@ function AddingModules-toAutomationAccount {
 
 	$Url = "https://www.powershellgallery.com/api/v2/Search()?`$filter=IsLatestVersion&searchTerm=%27$ModuleName $ModuleVersion%27&targetFramework=%27%27&includePrerelease=false&`$skip=0&`$top=40"
 
-	$SearchResult = Invoke-RestMethod -Method Get -Uri $Url
+	[array]$SearchResult = Invoke-RestMethod -Method Get -Uri $Url
 	if ($SearchResult.Count -ne 1) {
 		$SearchResult = $SearchResult[0]
 	}
@@ -209,18 +209,24 @@ function AddingModules-toAutomationAccount {
 }
 #Authenticate to Azure
 try {
-	Login-AzureRmAccount -Subscription $SubscriptionId -Credential $TenantAdminCredentials
+	$AZAuthentication = Login-AzureRmAccount -Subscription $SubscriptionId -Credential $TenantAdminCredentials
 }
 catch {
-	$_.Exception
+	Write-Output "Failed to authenticate Azure: $($_.exception.message)"
+	exit
 }
+$AzObj = $AZAuthentication | Out-String
+Write-Output "Authenticating as standard account for Azure. Result: `n$AzObj"
 #Authenticate to WVD
 try {
-	Add-RdsAccount -DeploymentUrl $RDBrokerURL -Credential $TenantAdminCredentials
+	$WVDAuthentication = Add-RdsAccount -DeploymentUrl $RDBrokerURL -Credential $TenantAdminCredentials
 }
 catch {
-	$_.Exception
+	Write-Output "Failed to authenticate WVD: $($_.exception.message)"
+	exit
 }
+$WVDObj = $WVDAuthentication | Out-String
+Write-Output "Authenticating as standard account for WVD. Result: `n$WVDObj"
 #Convert to local time to UTC time
 $CurrentDateTime = Get-Date
 $CurrentDateTime = $CurrentDateTime.ToUniversalTime()
@@ -242,49 +248,71 @@ if (!$AutomationAccount) {
 
 # Connect to Azure AD
 try {
-	Write-Output "Connecting Azure AD"
-	Connect-AzureAD -Credential $TenantAdminCredentials -Verbose
+	Write-Output "Connecting to Azure AD"
+	$AzADAuthentication = Connect-AzureAD -Credential $TenantAdminCredentials -Verbose
 }
 catch {
-	$_.Exception
+	Write-Output "Failed to authenticate AzureAD: $($_.exception.message)"
+	exit
 }
+$AzureADObj = $AzADAuthentication | Out-String
+Write-Output "Authenticating as standard account for AzureAD. Result: `n$AzureADObj"
+
 
 #Creating a serviceprincipal and assign the required role assignments at WVD Hostpool level and Subscription level
 $ServicePrincipal = Get-AzureADApplication -SearchString $AzureADApplicationName -ErrorAction SilentlyContinue
 if (!$ServicePrincipal)
 {
 	$svcPrincipal = New-AzureADApplication -AvailableToOtherTenants $true -DisplayName $AzureADApplicationName -Verbose
+	Write-Output "Dedicated Azure AD application was created for Automation Account"
 	$svcPrincipalCreds = New-AzureADApplicationPasswordCredential -ObjectId $svcPrincipal.ObjectId
+	Write-Output "Created Azure AD Application password credentials"
 	New-AzureRmADServicePrincipal -ApplicationId $svcPrincipal.AppId
+	Write-Output "Service Principal was created for application"
 	$secpasswd = ConvertTo-SecureString $svcPrincipalCreds.Value -AsPlainText -Force
 	$AppCredentials = New-Object System.Management.Automation.PSCredential ($svcPrincipal.AppId,$secpasswd)
 	Start-Sleep 45
 	New-AzureRmAutomationCredential -AutomationAccountName $AutomationAccountName -ResourceGroupName $ResourceGroupName -Name $CredentialsAssetName -Value $AppCredentials -Verbose
+	Write-Output "Service principal credentials stored into Azure Automation Account credentials asset"
 	New-AzureRmRoleAssignment -ApplicationId $svcPrincipal.AppId -RoleDefinitionName "Contributor"
-	New-RdsRoleAssignment -RoleDefinitionName "RDS Contributor" -ApplicationId $svcPrincipal.AppId -TenantName $TenantName -HostPoolName $HostpoolName
+	Write-Output "Assigned 'Contributor' role permission to the Service Principal at subscription for to access azure resources"
+	New-RdsRoleAssignment -RoleDefinitionName "RDS Contributor" -ApplicationId $svcPrincipal.AppId -TenantName $TenantName
+	Write-Output "Assigned 'RDS Contributor' role permission to the Service Principal at Tenant for to access the Hostpool"
 }
 
 #$Runbook = Get-AzureRmAutomationRunbook -Name $RunbookName -ResourceGroupName $ResourceGroupName -AutomationAccountName $AutomationAccountName -ErrorAction SilentlyContinue
 #if($Runbook -eq $null){
 #Creating a runbook and published the basic Scale script file
-$DeploymentStatus = New-AzureRmResourceGroupDeployment -ResourceGroupName $ResourceGroupName -TemplateUri "$ScriptRepoLocation/RunbookCreationTemplate.Json" -DeploymentDebugLogLevel All -existingAutomationAccountName $AutomationAccountName -RunbookName $RunbookName -Force -Verbose
+$DeploymentStatus = New-AzureRmResourceGroupDeployment -ResourceGroupName $ResourceGroupName -TemplateUri "$ScriptRepoLocation/runbookCreationTemplate.Json" -DeploymentDebugLogLevel All -existingAutomationAccountName $AutomationAccountName -RunbookName $RunbookName -Force -Verbose
 if ($DeploymentStatus.ProvisioningState -eq "Succeeded") {
+	#Check if the Webhook URI exists in automation variable
 	$WebhookURI = Get-AzureRmAutomationVariable -Name "WebhookURI" -ResourceGroupName $ResourceGroupName -AutomationAccountName $AutomationAccountName -ErrorAction SilentlyContinue
 	if (!$WebhookURI) {
 		$Webhook = New-AzureRmAutomationWebhook -Name $WebhookName -RunbookName $runbookName -IsEnabled $True -ExpiryTime (Get-Date).AddYears(5) -ResourceGroupName $ResourceGroupName -AutomationAccountName $AutomationAccountName -Force
+		Write-Output "Automation Account Webhook is created with name '$WebhookName'"
 		$URIofWebhook = $Webhook.WebhookURI | Out-String
 		New-AzureRmAutomationVariable -Name "WebhookURI" -Encrypted $false -ResourceGroupName $ResourceGroupName -AutomationAccountName $AutomationAccountName -Value $URIofWebhook
+		Write-Output "Webhook URI stored in Azure Automation Acccount variables"
 		$WebhookURI = Get-AzureRmAutomationVariable -Name "WebhookURI" -ResourceGroupName $ResourceGroupName -AutomationAccountName $AutomationAccountName -ErrorAction SilentlyContinue
 	}
 }
 #}
 # Required modules imported from Automation Account Modules gallery for Scale Script execution
 foreach ($ModuleName in $RequiredModules) {
+	# Check if the required modules are imported 
 	$ImportedModule = Get-AzureRmAutomationModule -ResourceGroupName $ResourceGroupName -AutomationAccountName $AutomationAccountName -Name $ModuleName -ErrorAction SilentlyContinue
 	if ($ImportedModule -eq $null) {
 		AddingModules-toAutomationAccount -ResourceGroupName $ResourceGroupName -AutomationAccountName $AutomationAccountName -ModuleName $ModuleName
-		if ($Module -eq "Az.Accounts") {
-			Start-Sleep -Seconds 40
+		$IsModuleImported = $false
+		while (!$IsModuleImported) {
+			$Module = Get-AzureRmAutomationModule -ResourceGroupName $ResourceGroupName -AutomationAccountName $AutomationAccountName -Name $ModuleName -ErrorAction SilentlyContinue
+			if ($Module.ProvisioningState -eq "Succeeded") {
+				$IsModuleImported = $true
+				Write-Output "Successfully '$ModuleName' module imported into Automation Account Modules..."
+			}
+			else {
+				Write-Output "Waiting for to import module '$ModuleName' into Automation Account Modules ..."
+			}
 		}
 	}
 }
@@ -365,18 +393,6 @@ $CustomLogWVDTenantScale = @"
 "@
 
 Post-LogAnalyticsData -customerId $CustomerID -sharedKey $SharedKey -Body ([System.Text.Encoding]::UTF8.GetBytes($CustomLogWVDTenantScale)) -logType $TenantScaleLogType
-#Custom WVDTenantUsage Table
-$CustomLogWVDTenantUsage = @"
-    [
-      {
-        "hostpoolName": " ",
-        "numberofRunnigHosts": " ",
-        "numberofCores": " "
-      }
-    ]
-"@
-Post-LogAnalyticsData -customerId $CustomerID -sharedKey $SharedKey -Body ([System.Text.Encoding]::UTF8.GetBytes($CustomLogWVDTenantUsage)) -logType $TenantUsageLogType
-
 
 #Creating Azure Scheduler job collection and job
 $RequestBody = @{
@@ -402,4 +418,7 @@ $RequestBody = @{
 	"LogOffMessageBody" = $LogOffMessageBody }
 $RequestBodyJson = $RequestBody | ConvertTo-Json
 $HostpoolName = $HostpoolName.Replace(' ','')
-$SchedulerDeployment = New-AzureRmResourceGroupDeployment -ResourceGroupName $ResourceGroupName -TemplateUri "$ScriptRepoLocation/AzureScheduler.json" -JobCollectionName $JobCollectionName -ActionURI $WebhookURI.Value -JobName $HostpoolName-Job -StartTime $CurrentDateTime -EndTime Never -RecurrenceInterval $RecurrenceInterval -ActionSettingsBody $RequestBodyJson -DeploymentDebugLogLevel All -Verbose
+$SchedulerDeployment = New-AzureRmResourceGroupDeployment -ResourceGroupName $ResourceGroupName -TemplateUri "$ScriptRepoLocation/azureScheduler.json" -JobCollectionName $JobCollectionName -ActionURI $WebhookURI.Value -JobName $HostpoolName-Job -StartTime $CurrentDateTime -EndTime Never -RecurrenceInterval $RecurrenceInterval -ActionSettingsBody $RequestBodyJson -DeploymentDebugLogLevel All -Verbose
+if ($SchedulerDeployment) {
+	Write-Output "$HostpoolName-job Azure Scheduler job was created successfully"
+}

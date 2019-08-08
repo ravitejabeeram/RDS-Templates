@@ -46,37 +46,6 @@ Set-ExecutionPolicy -ExecutionPolicy Unrestricted -Scope LocalMachine -Force -Co
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-#Collect the credentials from Azure Automation Account Assets
-$Credentials = Get-AutomationPSCredential -Name $CredentialAssetName
-
-#Authenticating to Azure
-try {
-	$AZAuthentication = Add-AzAccount -Credential $Credentials -TenantId $AADTenantId -SubscriptionId $SubscriptionID -ServicePrincipal
-	#Select Azure Subscription
-	$AzSubscription = Select-AzSubscription -Subscription $SubscriptionID -Tenant $AADTenantID -Force
-}
-catch {
-	Write-Output "Failed to authenticate Azure: $($_.exception.message)" "Error"
-	exit
-}
-$AzObj = $authentication | Out-String
-Write-Output "Authenticating as standard account for WVD. Result: `n$AzObj"
-
-#Authenticating to WVD
-try {
-	$WVDAuthentication = Add-RdsAccount -DeploymentUrl $RDBrokerURL -Credential $Credentials -TenantId $AADTenantId -ServicePrincipal
-}
-catch {
-	Write-Output "Failed to authenticate WVD: $($_.exception.message)" "Error"
-	exit
-}
-$WVDObj = $WVDAuthentication | Out-String
-Write-Output "Authenticating as standard account for WVD. Result: `n$WVDObj"
-
-<#
-.Description
-Helper functions
-#>
 #Function to convert from UTC to Local time
 function Convert-UTCtoLocalTime
 {
@@ -98,10 +67,11 @@ function Convert-UTCtoLocalTime
 	return $ConvertedTime
 }
 # Function for to add logs to log analytics workspace
+# Function for to add logs to log analytics workspace
 function Add-LogEntry
 {
 	param(
-		[Object]$LogMessage,
+		[Object]$LogMessageObj,
 		[string]$LogAnalyticsWorkspaceId,
 		[string]$LogAnalyticsPrimaryKey,
 		[string]$LogType,
@@ -119,13 +89,13 @@ function Add-LogEntry
 				'_g' { $sep = '"'; $trim = $Key.Length - 2 }
 				default { $sep = '"'; $trim = $Key.Length }
 			}
-			$LogMessage = $LogMessage + '"' + $Key.Substring(0,$trim) + '":' + $sep + $LogMessage.Item($Key) + $sep + ','
+			$LogData = $LogData + '"' + $Key.Substring(0,$trim) + '":' + $sep + $LogMessageObj.Item($Key) + $sep + ','
 		}
-		$TimeStamp = ConvertUTCtoLocal -TimeDifferenceInHours $TimeDifferenceInHours
-		$LogMessage = $LogMessage + '"TimeStamp":"' + $timestamp + '"'
+		$TimeStamp = Convert-UTCtoLocalTime -TimeDifferenceInHours $TimeDifferenceInHours
+		$LogData = $LogData + '"TimeStamp":"' + $timestamp + '"'
 
-		Write-Verbose "LogData: $($LogMessage)"
-		$json = "{$($LogMessage)}"
+		Write-Verbose "LogData: $($LogData)"
+		$json = "{$($LogData)}"
 
 		$PostResult = Send-OMSAPIIngestionFile -customerId $LogAnalyticsWorkspaceId -sharedKey $LogAnalyticsPrimaryKey -Body "$json" -logType $LogType -TimeStampField "TimeStamp"
 		Write-Verbose "PostResult: $($PostResult)"
@@ -134,6 +104,53 @@ function Add-LogEntry
 		}
 	}
 }
+#Collect the credentials from Azure Automation Account Assets
+$Credentials = Get-AutomationPSCredential -Name $CredentialAssetName
+
+#Authenticating to Azure
+try {
+	$AZAuthentication = Add-AzAccount -Credential $Credentials -TenantId $AADTenantId -SubscriptionId $SubscriptionID -ServicePrincipal
+	#Select Azure Subscription
+	$AzSubscription = Select-AzSubscription -Subscription $SubscriptionID -Tenant $AADTenantID -Force
+}
+catch {
+	Write-Output "Failed to authenticate Azure: $($_.exception.message)"
+	$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Failed to authenticate Azure: $($_.exception.message)" }
+	Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
+	exit
+}
+$AzObj = $AZAuthentication | Out-String
+Write-Output "Authenticating as service principal for Azure. Result: `n$AzObj"
+$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Authenticating as service principal for Azure. Result: `n$AzObj" }
+Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
+
+$AzSubObj = $AzSubscription | Out-String
+Write-Output "Sets the Azure subscription. Result: `n$AzSubObj"
+$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Sets the Azure subscription. Result: `n$AzSubObj" }
+Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
+
+
+#Authenticating to WVD
+try {
+	$WVDAuthentication = Add-RdsAccount -DeploymentUrl $RDBrokerURL -Credential $Credentials -TenantId $AADTenantId -ServicePrincipal
+}
+catch {
+	Write-Output "Failed to authenticate WVD: $($_.exception.message)"
+	$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Failed to authenticate WVD: $($_.exception.message)" }
+	Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
+	exit
+}
+$WVDObj = $WVDAuthentication | Out-String
+Write-Output "Authenticating as service principal for WVD. Result: `n$WVDObj"
+$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Authenticating as service principal for WVD. Result: `n$WVDObj" }
+Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
+
+
+
+<#
+.Description
+Helper functions
+#>
 # Function to update load balancer type based on PeakloadbalancingType
 function Updating-LoadBalancingTypeInPeakHours
 {
@@ -146,6 +163,10 @@ function Updating-LoadBalancingTypeInPeakHours
 	)
 	if ($HostpoolInfo.LoadBalancerType -ne $PeakLoadBalancingType) {
 		Write-Output "Changing Hostpool Load Balance Type:$PeakLoadBalancingType Current Date Time is: $CurrentDateTime"
+		$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Changing Hostpool Load Balance Type:$PeakLoadBalancingType Current Date Time is: $CurrentDateTime" }
+		Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
+
+
 		if ($PeakLoadBalancingType -eq "DepthFirst") {
 			Set-RdsHostPool -TenantName $TenantName -Name $HostpoolName -DepthFirstLoadBalancer -MaxSessionLimit $HostpoolInfo.MaxSessionLimit
 		}
@@ -153,6 +174,10 @@ function Updating-LoadBalancingTypeInPeakHours
 			Set-RdsHostPool -TenantName $TenantName -Name $HostpoolName -BreadthFirstLoadBalancer -MaxSessionLimit $HostpoolInfo.MaxSessionLimit
 		}
 		Write-Output "Hostpool Load balancer Type in Session Load Balancing Peak Hours is '$PeakLoadBalancingType Load Balancing'"
+		$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Hostpool Load balancer Type in Session Load Balancing Peak Hours is '$PeakLoadBalancingType Load Balancing'" }
+		Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
+
+
 	}
 }
 # Function to update load balancer type in off peak hours
@@ -167,6 +192,9 @@ function Updating-LoadBalancingTypeINOffPeakHours
 	)
 	if ($HostpoolInfo.LoadBalancerType -eq $PeakLoadBalancingType) {
 		Write-Output "Changing Hostpool Load Balance Type in off peak hours Current Date Time is: $CurrentDateTime"
+		$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Changing Hostpool Load Balance Type in off peak hours Current Date Time is: $CurrentDateTime" }
+		Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
+
 		if ($hostpoolinfo.LoadBalancerType -ne "DepthFirst") {
 			$LoadBalanceType = Set-RdsHostPool -TenantName $TenantName -Name $HostpoolName -DepthFirstLoadBalancer -MaxSessionLimit $MaxSessionLimitValue
 
@@ -175,6 +203,8 @@ function Updating-LoadBalancingTypeINOffPeakHours
 		}
 		$LoadBalancerType = $LoadBalanceType.LoadBalancerType
 		Write-Output "Hostpool Load balancer Type in off Peak Hours is '$LoadBalancerType Load Balancing'"
+		$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Hostpool Load balancer Type in off Peak Hours is '$LoadBalancerType Load Balancing'" }
+		Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 	}
 }
 # Function to Check if the hostpool have sessionhosts
@@ -187,6 +217,8 @@ function Check-IfHostpoolHaveSessionHosts
 	$ListOfSessionHosts = Get-RdsSessionHost -TenantName $TenantName -HostPoolName $HostpoolName -ErrorAction SilentlyContinue | Sort-Object SessionHostName
 	if ($ListOfSessionHosts -eq $null) {
 		Write-Output "Sessionhosts does not exist in the Hostpool of '$HostpoolName'. Ensure that hostpool have hosts or not?."
+		$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Sessionhosts does not exist in the Hostpool of '$HostpoolName'. Ensure that hostpool have hosts or not?." }
+		Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 		exit
 	}
 	return $ListOfSessionHosts
@@ -217,6 +249,8 @@ function Check-IfSessionHostInMaintenance
 	$VmInfo = Get-AzVM | Where-Object { $_.Name -eq $VMName }
 	if ($VmInfo.Tags.Keys -contains $MaintenanceTagName) {
 		Write-Output "Session Host is in Maintenance: $VMName"
+		$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Session Host is in Maintenance: $VMName" }
+		Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 		continue
 	}
 }
@@ -229,10 +263,14 @@ function Start-SessionHost
 	)
 	try {
 		Write-Output "Starting Azure VM: $VMName and waiting for it to complete ..."
+		$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Starting Azure VM: $VMName and waiting for it to complete ..." }
+		Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 		Get-AzVM | Where-Object { $_.Name -eq $VMName } | Start-AzVM
 	}
 	catch {
 		Write-Output "Failed to start Azure VM: $($VMName) with error: $($_.exception.message)"
+		$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Failed to start Azure VM: $($VMName) with error: $($_.exception.message)" }
+		Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 		exit
 	}
 
@@ -245,10 +283,14 @@ function Stop-SessionHost
 	)
 	try {
 		Write-Output "Stopping Azure VM: $VMName and waiting for it to complete ..."
+		$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Stopping Azure VM: $VMName and waiting for it to complete ..." }
+		Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 		Get-AzVM | Where-Object { $_.Name -eq $VMName } | Stop-AzVM -Force
 	}
 	catch {
 		Write-Output "Failed to stop Azure VM: $VMName with error: $_.exception.message"
+		$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Failed to stop Azure VM: $VMName with error: $_.exception.message" }
+		Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 		exit
 	}
 }
@@ -284,6 +326,8 @@ function PeakHours-StartSessionHosts-DF
 	foreach ($SessionHost in $AllSessionHosts) {
 
 		Write-Output "Checking session host:$($SessionHost.SessionHostName | Out-String)  of sessions:$($SessionHost.Sessions) and status:$($SessionHost.Status)"
+		$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Checking session host:$($SessionHost.SessionHostName | Out-String)  of sessions:$($SessionHost.Sessions) and status:$($SessionHost.Status)" }
+		Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 		$SessionCapacityofSessionHost = $SessionHost.Sessions
 		# Check the Session host is in maintenance
 		Check-IfSessionHostInMaintenance -VMName $VMName
@@ -292,9 +336,13 @@ function PeakHours-StartSessionHosts-DF
 		}
 	}
 	Write-Output "Current number of running hosts: $NumberOfRunningHost"
+	$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Current number of running hosts: $NumberOfRunningHost" }
+	Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 	if ($NumberOfRunningHost -lt $MinimumNumberOfRDSH)
 	{
 		Write-Output "Current number of running session hosts is less than minimum requirements, start session host ..."
+		$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Current number of running session hosts is less than minimum requirements, start session host ..." }
+		Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 		foreach ($SessionHost in $AllSessionHosts) {
 
 			if ($NumberOfRunningHost -lt $MinimumNumberOfRDSH) {
@@ -329,6 +377,8 @@ function PeakHours-StartSessionHosts-DF
 						# Check the session host status and if the session host is healthy before starting the host
 						if ($SessionHost.UpdateState -eq "Succeeded") {
 							Write-Output "Existing Sessionhost Sessions value reached near by hostpool maximumsession limit need to start the session host"
+							$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Existing Sessionhost Sessions value reached near by hostpool maximumsession limit need to start the session host" }
+							Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 							$SessionHostName = $SessionHost.SessionHostName | Out-String
 							$VMName = $SessionHostName.Split(".")[0]
 
@@ -354,6 +404,8 @@ function PeakHours-StartSessionHosts-DF
 		}
 	}
 	Write-Output "HostpoolName:$HostpoolName, NumberofRunnighosts:$NumberOfRunningHost"
+	$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "HostpoolName:$HostpoolName, NumberofRunnighosts:$NumberOfRunningHost" }
+	Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 }
 # Start the session hosts in Peak hours - BreadthFirst
 function PeakHours-StartSessionHosts-BF
@@ -375,6 +427,8 @@ function PeakHours-StartSessionHosts-BF
 	$AvailableSessionCapacity = 0
 	foreach ($SessionHost in $AllSessionHosts) {
 		Write-Output "Checking session host:$($SessionHost.SessionHostName | Out-String)  of sessions:$($SessionHost.Sessions) and status:$($SessionHost.Status)"
+		$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Checking session host:$($SessionHost.SessionHostName | Out-String)  of sessions:$($SessionHost.Sessions) and status:$($SessionHost.Status)" }
+		Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 		$SessionHostName = $SessionHost.SessionHostName | Out-String
 		$VMName = $SessionHostName.Split(".")[0]
 
@@ -396,9 +450,13 @@ function PeakHours-StartSessionHosts-BF
 
 	}
 	Write-Output "Current number of running hosts:$NumberOfRunningHost"
+	$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Current number of running hosts:$NumberOfRunningHost" }
+	Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 	if ($NumberOfRunningHost -lt $MinimumNumberOfRDSH) {
 
 		Write-Output "Current number of running session hosts is less than minimum requirements, start session host ..."
+		$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Current number of running session hosts is less than minimum requirements, start session host ..." }
+		Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 		# Start VM to meet the minimum requirement            
 		foreach ($SessionHost in $AllSessionHosts.SessionHostName) {
 
@@ -440,9 +498,15 @@ function PeakHours-StartSessionHosts-BF
 	else {
 		#check if the available capacity meets the number of sessions or not
 		Write-Output "Current total number of user sessions: $(($HostPoolUserSessions).Count)"
+		$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Current total number of user sessions: $(($HostPoolUserSessions).Count)" }
+		Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 		Write-Output "Current available session capacity is: $AvailableSessionCapacity"
+		$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Current available session capacity is: $AvailableSessionCapacity" }
+		Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 		if ($HostPoolUserSessions.Count -ge $AvailableSessionCapacity) {
 			Write-Output "Current available session capacity is less than demanded user sessions, starting session host"
+			$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Current available session capacity is less than demanded user sessions, starting session host" }
+			Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 			# Running out of capacity, we need to start more VMs if there are any 
 			foreach ($SessionHost in $AllSessionHosts.SessionHostName) {
 				if ($HostPoolUserSessions.Count -ge $AvailableSessionCapacity) {
@@ -468,6 +532,8 @@ function PeakHours-StartSessionHosts-BF
 							$NumberOfRunningHost = $NumberOfRunningHost + 1
 							$TotalRunningCores = $TotalRunningCores + $RoleSize.NumberOfCores
 							Write-Output "New available session capacity is: $AvailableSessionCapacity"
+							$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "New available session capacity is: $AvailableSessionCapacity" }
+							Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 							if ($AvailableSessionCapacity -gt $HostPoolUserSessions.Count) {
 								break
 							}
@@ -479,6 +545,8 @@ function PeakHours-StartSessionHosts-BF
 		}
 	}
 	Write-Output "HostpoolName:$HostpoolName, TotalRunningCores:$TotalRunningCores NumberOfRunningHost:$NumberOfRunningHost"
+	$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "HostpoolName:$HostpoolName, TotalRunningCores:$TotalRunningCores NumberOfRunningHost:$NumberOfRunningHost" }
+	Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 
 }
 # Log off User Sessions in Off peak hours
@@ -498,6 +566,8 @@ function SignOfUserSessions
 	}
 	catch {
 		Write-Output "Unable to set it to allow connections on session host: $($SessionHost.SessionHost) with error: $($_.exception.message)"
+		$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Unable to set it to allow connections on session host: $($SessionHost.SessionHost) with error: $($_.exception.message)" }
+		Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 		exit 1
 	}
 	# Notify user to log off session
@@ -507,10 +577,14 @@ function SignOfUserSessions
 	}
 	catch {
 		Write-Output "Failed to retrieve user sessions in hostPool: $($HostpoolName) with error: $($_.exception.message)"
+		$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Failed to retrieve user sessions in hostPool: $($HostpoolName) with error: $($_.exception.message)" }
+		Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 		exit 1
 	}
 	$HostUserSessionCount = ($HostPoolUserSessions | Where-Object -FilterScript { $_.SessionHostName -eq $SessionHost }).Count
 	Write-Output "Counting the current sessions on the host $SessionHost...:$HostUserSessionCount"
+	$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Counting the current sessions on the host $SessionHost...:$HostUserSessionCount" }
+	Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 	$ExistingSession = 0
 	foreach ($session in $HostPoolUserSessions) {
 		if ($session.SessionHostName -eq $SessionHost) {
@@ -521,6 +595,8 @@ function SignOfUserSessions
 				}
 				catch {
 					Write-Output "Failed to send message to user with error: $($_.exception.message)"
+					$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Failed to send message to user with error: $($_.exception.message)" }
+					Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 					exit 1
 				}
 			}
@@ -532,11 +608,15 @@ function SignOfUserSessions
 	if ($LimitSecondsToForceLogOffUser -ne 0) {
 		# Force users to log off
 		Write-Output "Force users to log off..."
+		$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Force users to log off..." }
+		Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 		try {
 			$HostPoolUserSessions = Get-RdsUserSession -TenantName $TenantName -HostPoolName $HostpoolName
 		}
 		catch {
 			Write-Output "Failed to retrieve list of user sessions in hostPool: $($HostpoolName) with error: $($_.exception.message)"
+			$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Failed to retrieve list of user sessions in hostPool: $($HostpoolName) with error: $($_.exception.message)" }
+			Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 			exit 1
 		}
 		foreach ($Session in $HostPoolUserSessions) {
@@ -548,6 +628,8 @@ function SignOfUserSessions
 				}
 				catch {
 					Write-Output "Failed to log off user with error: $($_.exception.message)"
+					$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Failed to log off user with error: $($_.exception.message)" }
+					Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 					exit 1
 				}
 			}
@@ -612,8 +694,10 @@ function OffPeakSessionHost-Shutdown
 				}
 			}
 		}
-		return $NumberofRunnighost
+		return $NumberofRunnigHost
 		Write-Output "HostpoolName:$HostpoolName, NumberofRunnighosts:$NumberOfRunningHost"
+		$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "HostpoolName:$HostpoolName, NumberofRunnighosts:$NumberOfRunningHost" }
+		Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 	}
 	else
 	{
@@ -649,9 +733,13 @@ function OffPeakSessionHost-Shutdown
 							if ($RoleInstance.PowerState -eq "VM deallocated") {
 								$IsVMStopped = $true
 								Write-Output "Azure VM has been stopped: $($RoleInstance.Name) ..."
+								$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Azure VM has been stopped: $($RoleInstance.Name) ..." }
+								Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 							}
 							else {
 								Write-Output "Waiting for Azure VM to stop $($RoleInstance.Name) ..."
+								$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Waiting for Azure VM to stop $($RoleInstance.Name) ..." }
+								Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 							}
 						}
 						$SessionHostInfo = Get-RdsSessionHost -TenantName $TenantName -HostPoolName $HostpoolName -Name $SessionHostName
@@ -669,6 +757,8 @@ function OffPeakSessionHost-Shutdown
 		}
 		return $NumberofRunnigHost,$TotalRunningCores
 		Write-Output "HostpoolName:$HostpoolName, TotalRunningCores:$TotalRunningCores NumberOfRunningHost:$NumberOfRunningHost"
+		$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "HostpoolName:$HostpoolName, TotalRunningCores:$TotalRunningCores NumberOfRunningHost:$NumberOfRunningHost" }
+		Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 	}
 }
 # Check the Off peak time UserSession usage and spin up the Session Host
@@ -705,6 +795,8 @@ function OffPeakUserSessionUsage-SpinUpSessionHost
 	$HostpoolSessionCount = (Get-RdsUserSession -TenantName $TenantName -HostPoolName $HostpoolName).Count
 	if ($HostpoolSessionCount -eq 0) {
 		Write-Output "HostpoolName:$HostpoolName, NumberofRunnighosts:$NumberOfRunningHost"
+		$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "HostpoolName:$HostpoolName, NumberofRunnighosts:$NumberOfRunningHost" }
+		Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 		break
 	}
 	else {
@@ -723,6 +815,8 @@ function OffPeakUserSessionUsage-SpinUpSessionHost
 						# Check the session host status and if the session host is healthy before starting the host
 						if ($SessionHost.Status -eq "NoHeartbeat" -and $SessionHost.UpdateState -eq "Succeeded") {
 							Write-Output "Existing Sessionhost Sessions value reached near by hostpool maximumsession limit need to start the session host"
+							$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Existing Sessionhost Sessions value reached near by hostpool maximumsession limit need to start the session host" }
+							Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 							$SessionHostName = $SessionHost.SessionHostName | Out-String
 							$VMName = $SessionHostName.Split(".")[0]
 							# Check the Session host is in maintenance
@@ -746,13 +840,19 @@ function OffPeakUserSessionUsage-SpinUpSessionHost
 							}
 							if ($type -eq "DepthFirst") {
 								Write-Output "HostpoolName:$HostpoolName, NumberofRunnighosts:$NumberOfRunningHost"
+								$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "HostpoolName:$HostpoolName, NumberofRunnighosts:$NumberOfRunningHost" }
+								Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 							} else {
 								# Calculate available capacity of sessions
 								$RoleSize = Get-AzVMSize -Location $RoleInstance.Location | Where-Object { $_.Name -eq $RoleInstance.HardwareProfile.VmSize }
 								$AvailableSessionCapacity = $TotalAllowSessions + $HostpoolInfo.MaxSessionLimit
 								$TotalRunningCores = $TotalRunningCores + $RoleSize.NumberOfCores
 								Write-Output "New available session capacity is: $AvailableSessionCapacity"
+								$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "New available session capacity is: $AvailableSessionCapacity" }
+								Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 								Write-Output "HostpoolName:$HostpoolName, TotalRunningCores:$TotalRunningCores NumberOfRunningHost:$NumberOfRunningHost"
+								$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "HostpoolName:$HostpoolName, TotalRunningCores:$TotalRunningCores NumberOfRunningHost:$NumberOfRunningHost" }
+								Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 							}
 							break
 						}
@@ -771,6 +871,8 @@ $CurrentDateTime = Convert-UTCtoLocalTime -TimeDifferenceInHours $TimeDifference
 $CurrentTenantGroupName = (Get-RdsContext).TenantGroupName
 if ($TenantGroupName -ne $CurrentTenantGroupName) {
 	Write-Output "Running switching to the $TenantGroupName context"
+	$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Running switching to the $TenantGroupName context" }
+	Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 	Set-RdsContext -TenantGroupName $TenantGroupName
 }
 
@@ -786,6 +888,8 @@ if ($EndPeakDateTime -lt $BeginPeakDateTime) {
 $HostpoolInfo = Get-RdsHostPool -TenantName $TenantName -Name $HostpoolName
 if ($HostpoolInfo -eq $null) {
 	Write-Output "Hostpoolname '$HostpoolName' does not exist in the tenant of '$TenantName'. Ensure that you have entered the correct values."
+	$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Hostpoolname '$HostpoolName' does not exist in the tenant of '$TenantName'. Ensure that you have entered the correct values." }
+	Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 	exit
 }
 
@@ -799,6 +903,8 @@ else {
 	Updating-LoadBalancingTypeINOffPeakHours -HostpoolLoadbalancerType $HostpoolLoadbalancerType -PeakLoadBalancingType $PeakloadbalancingType -TenantName $TenantName -HostPoolName $HostpoolName -MaxSessionLimitValue $MaxSessionLimitValue
 }
 Write-Output "Starting WVD Tenant Hosts Scale Optimization: Current Date Time is: $CurrentDateTime"
+$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Starting WVD Tenant Hosts Scale Optimization: Current Date Time is: $CurrentDateTime" }
+Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 # Check the after changing hostpool loadbalancer type
 $HostpoolInfo = Get-RdsHostPool -TenantName $TenantName -Name $HostPoolName
 
@@ -807,15 +913,23 @@ $AllSessionHosts = Check-IfHostpoolHaveSessionHosts -TenantName $TenantName -Hos
 if ($HostpoolInfo.LoadBalancerType -eq "DepthFirst")
 {
 	Write-Output "$HostpoolName hostpool loadbalancer type is $($HostpoolInfo.LoadBalancerType)"
+	$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "$HostpoolName hostpool loadbalancer type is $($HostpoolInfo.LoadBalancerType)" }
+	Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 	#Gathering hostpool maximum session and calculating Scalefactor for each host.										  
 	$HostpoolMaxSessionLimit = $HostpoolInfo.MaxSessionLimit
 	$ScaleFactorEachHost = $HostpoolMaxSessionLimit * 0.80
 	$SessionhostLimit = [math]::Floor($ScaleFactorEachHost)
 	Write-Output "Hostpool Maximum Session Limit: $($HostpoolMaxSessionLimit)"
+	$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Hostpool Maximum Session Limit: $($HostpoolMaxSessionLimit)" }
+	Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 	if ($CurrentDateTime -ge $BeginPeakDateTime -and $CurrentDateTime -le $EndPeakDateTime)
 	{
 		Write-Output "It is in peak hours now"
+		$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "It is in peak hours now" }
+		Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 		Write-Output "Peak hours: starting session hosts as needed based on current workloads."
+		$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Peak hours: starting session hosts as needed based on current workloads." }
+		Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 
 		# Peak hours check and remove the MinimumnoofRDSH value dynamically stored in automation variable 												   
 		$AutomationAccount = Get-AzAutomationAccount -ErrorAction SilentlyContinue | Where-Object { $_.AutomationAccountName -eq $AutomationAccountName }
@@ -828,16 +942,22 @@ if ($HostpoolInfo.LoadBalancerType -eq "DepthFirst")
 	}
 	else {
 		Write-Output "It is Off-peak hours"
+		$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "It is Off-peak hours" }
+		Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 		Write-Output "It is off-peak hours. Starting to scale down RD session hosts..."
+		$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "It is off-peak hours. Starting to scale down RD session hosts..." }
+		Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 		#Check the number running session hosts of hostpool
 		$NumberOfRunningHost = 0
 		foreach ($SessionHost in $AllSessionHosts) {
 			if ($SessionHost.Status -eq "Available") {
 				Write-Output "Checking session host:$($SessionHost.SessionHostName | Out-String)  of sessions:$($SessionHost.Sessions) and status:$($SessionHost.Status)"
+				$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Checking session host:$($SessionHost.SessionHostName | Out-String)  of sessions:$($SessionHost.Sessions) and status:$($SessionHost.Status)" }
+				Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 				$NumberOfRunningHost = $NumberOfRunningHost + 1
 			}
 		}
-		# Defined minimum no of rdsh value from JSON file
+		# Defined minimum no of rdsh value from Webhook Data
 		[int]$DefinedMinimumNumberOfRDSH = $MinimumNumberOfRDSH
 
 		# Check and Collecting dynamically stored MinimumNoOfRDSH Value																 
@@ -854,14 +974,22 @@ if ($HostpoolInfo.LoadBalancerType -eq "DepthFirst")
 
 	}
 	Write-Output "End WVD Tenant Scale Optimization."
+	$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "End WVD Tenant Scale Optimization." }
+	Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 }
 else {
 	Write-Output "$HostpoolName hostpool loadbalancer type is $($HostpoolInfo.LoadBalancerType)"
+	$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "$HostpoolName hostpool loadbalancer type is $($HostpoolInfo.LoadBalancerType)" }
+	Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 	# Check if it is during the peak or off-peak time
 	if ($CurrentDateTime -ge $BeginPeakDateTime -and $CurrentDateTime -le $EndPeakDateTime)
 	{
 		Write-Output "It is in peak hours now"
+		$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "It is in peak hours now" }
+		Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 		Write-Output "Peak hours: starting session hosts as needed based on current workloads."
+		$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Peak hours: starting session hosts as needed based on current workloads." }
+		Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 
 		# Peak hours check and remove the MinimumnoofRDSH value dynamically stored in automation variable 												   
 		$AutomationAccount = Get-AzAutomationAccount -ErrorAction SilentlyContinue | Where-Object { $_.AutomationAccountName -eq $AutomationAccountName }
@@ -875,8 +1003,14 @@ else {
 	else
 	{
 		Write-Output "It is Off-peak hours"
+		$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "It is Off-peak hours" }
+		Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 		Write-Output "It is off-peak hours. Starting to scale down RD session hosts..."
+		$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "It is off-peak hours. Starting to scale down RD session hosts..." }
+		Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 		Write-Output "Processing hostPool $($HostpoolName)"
+		$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Processing hostPool $($HostpoolName)" }
+		Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 		# Check the number of running session hosts
 		$NumberOfRunningHost = 0
 		# Total number of running cores
@@ -884,6 +1018,8 @@ else {
 		foreach ($SessionHost in $AllSessionHosts) {
 			$SessionHostName = $SessionHost.SessionHostName
 			Write-Output "Checking session host:$($SessionHost.SessionHostName | Out-String)  of sessions:$($SessionHost.Sessions) and status:$($SessionHost.Status)"
+			$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "Checking session host:$($SessionHost.SessionHostName | Out-String)  of sessions:$($SessionHost.Sessions) and status:$($SessionHost.Status)" }
+			Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 			$VMName = $SessionHostName.Split(".")[0]
 			$RoleInstance = Get-AzVM -Status | Where-Object { $_.Name.Contains($VMName) }
 			if ($SessionHostName.ToLower().Contains($RoleInstance.Name.ToLower())) {
@@ -896,7 +1032,7 @@ else {
 				}
 			}
 		}
-		# Defined minimum no of rdsh value from JSON file
+		# Defined minimum no of rdsh value from Webhook Data
 		[int]$DefinedMinimumNumberOfRDSH = $MinimumNumberOfRDSH
 		## Check and Collecting dynamically stored MinimumNoOfRDSH Value																 
 		$AutomationAccount = Get-AzAutomationAccount -ErrorAction SilentlyContinue | Where-Object { $_.AutomationAccountName -eq $AutomationAccountName }
@@ -907,7 +1043,9 @@ else {
 		##############Shut down the session hosts in Off peak hours#############
 		OffPeakSessionHost-Shutdown -Type "BreadthFirst" -TenantName $TenantName -HostPoolName $HostpoolName -MinimumNumberOfRDSH $MinimumNumberOfRDSH -NumberOfRunningHost $NumberOfRunningHost -LimitSecondsToForceLogOffUser $LimitSecondsToForceLogOffUser -LogOffMessageTitle $LogOffMessageTitle -LogOffMessageBody $LogOffMessageBody -TotalRunningCores $TotalRunningCores
 		# Check the User Sessions Usage in off peak hours and Spin up the Session host
-		OffPeakUserSessionUsage-SpinUpSessionHost -NumberOfRunningHost $NumberOfRunningHost -MinimumNumberOfRDSH $MinimumNumberOfRDSH -DefinedMinimumNumberOfRDSH $DefinedMinimumNumberOfRDSH -TenantName $TenantName -HostPoolName $HostpoolName -Type "BreadthFirst"
+		OffPeakUserSessionUsage-SpinUpSessionHost -NumberOfRunningHost $NumberOfRunningHost -MinimumNumberOfRDSH $MinimumNumberOfRDSH -DefinedMinimumNumberOfRDSH $DefinedMinimumNumberOfRDSH -TenantName $TenantName -HostPoolName $HostpoolName -Type "BreadthFirst" -TotalRunningCores $TotalRunningCores
 	}
 	Write-Output "End WVD Tenant Scale Optimization."
+	$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "End WVD Tenant Scale Optimization." }
+	Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 }
