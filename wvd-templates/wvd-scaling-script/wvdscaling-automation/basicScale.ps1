@@ -110,7 +110,8 @@ $Credentials = Get-AutomationPSCredential -Name $CredentialAssetName
 #$Credentials = Get-AutomationPSCredential -Name $Credentialsobj
 #Authenticating to Azure
 try {
-	$AZAuthentication = Add-AzAccount -Credential $Credentials -TenantId $AADTenantId -SubscriptionId $SubscriptionID -ServicePrincipal
+	Clear-AzContext -Force
+	$AZAuthentication = Connect-AzAccount -Credential $Credentials -TenantId $AADTenantId -SubscriptionId $SubscriptionID -ServicePrincipal
 	#Select Azure Subscription
 	$AzSubscription = Select-AzSubscription -Subscription $SubscriptionID -Tenant $AADTenantID -Force
 }
