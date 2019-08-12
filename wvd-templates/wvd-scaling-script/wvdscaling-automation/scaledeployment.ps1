@@ -69,61 +69,61 @@
 
 #>
 param(
-	[Parameter(mandatory = $true)]
+	[Parameter(Mandatory = $true)]
 	[pscredential]$TenantAdminCredentials,
 
-	[Parameter(mandatory = $True)]
+	[Parameter(Mandatory = $True)]
 	[string]$TenantGroupName,
 
-	[Parameter(mandatory = $True)]
+	[Parameter(Mandatory = $True)]
 	[string]$TenantName,
 
-	[Parameter(mandatory = $True)]
+	[Parameter(Mandatory = $True)]
 	[string]$HostpoolName,
 
-	[Parameter(mandatory = $True)]
+	[Parameter(Mandatory = $True)]
 	[string]$PeakLoadBalancingType,
 
-	[Parameter(mandatory = $True)]
+	[Parameter(Mandatory = $True)]
 	[int]$RecurrenceInterval,
 
-	[Parameter(mandatory = $True)]
+	[Parameter(Mandatory = $True)]
 	[string]$AADTenantId,
 
-	[Parameter(mandatory = $True)]
+	[Parameter(Mandatory = $True)]
 	[string]$SubscriptionId,
 
-	[Parameter(mandatory = $True)]
+	[Parameter(Mandatory = $True)]
 	$BeginPeakTime,
 
-	[Parameter(mandatory = $True)]
+	[Parameter(Mandatory = $True)]
 	$EndPeakTime,
 
-	[Parameter(mandatory = $True)]
+	[Parameter(Mandatory = $True)]
 	$TimeDifference,
 
-	[Parameter(mandatory = $True)]
+	[Parameter(Mandatory = $True)]
 	[int]$SessionThresholdPerCPU,
 
-	[Parameter(mandatory = $True)]
+	[Parameter(Mandatory = $True)]
 	[int]$MinimumNumberOfRDSH,
 
-	[Parameter(mandatory = $True)]
+	[Parameter(Mandatory = $True)]
 	[string]$MaintenanceTagName,
 
-	[Parameter(mandatory = $True)]
+	[Parameter(Mandatory = $True)]
 	[string]$WorkspaceName,
 
-	[Parameter(mandatory = $True)]
+	[Parameter(Mandatory = $True)]
 	[int]$LimitSecondsToForceLogOffUser,
 
-	[Parameter(mandatory = $False)]
+	[Parameter(Mandatory = $False)]
 	[string]$Location = "South Central US",
 
-	[Parameter(mandatory = $True)]
+	[Parameter(Mandatory = $True)]
 	[string]$LogOffMessageTitle,
 
-	[Parameter(mandatory = $True)]
+	[Parameter(Mandatory = $True)]
 	[string]$LogOffMessageBody
 )
 
@@ -144,17 +144,17 @@ $ScriptRepoLocation = "https://raw.githubusercontent.com/Azure/RDS-Templates/ptg
 #Function to add Required modules to Azure Automation account
 function AddingModules-toAutomationAccount {
 	param(
-		[Parameter(mandatory = $true)]
+		[Parameter(Mandatory = $true)]
 		[string]$ResourceGroupName,
 
-		[Parameter(mandatory = $true)]
+		[Parameter(Mandatory = $true)]
 		[string]$AutomationAccountName,
 
-		[Parameter(mandatory = $true)]
+		[Parameter(Mandatory = $true)]
 		[string]$ModuleName,
 
 		# if not specified latest version will be imported
-		[Parameter(mandatory = $false)]
+		[Parameter(Mandatory = $false)]
 		[string]$ModuleVersion
 	)
 
@@ -173,7 +173,7 @@ function AddingModules-toAutomationAccount {
 		Write-Error "Module name '$ModuleName' returned multiple results. Please specify an exact module name."
 	}
 	else {
-		$PackageDetails = Invoke-RestMethod -Method Get -Uri $SearchResult.Id
+		$PackageDetails = Invoke-RestMethod -Method Get -Uri $SearchResult.id
 
 		if (!$ModuleVersion) {
 			$ModuleVersion = $PackageDetails.entry.properties.version
@@ -278,17 +278,6 @@ if (!$ServicePrincipal)
 	Write-Output "Assigned 'Contributor' role permission to the Service Principal at subscription for to access azure resources"
 	New-RdsRoleAssignment -RoleDefinitionName "RDS Contributor" -ApplicationId $svcPrincipal.AppId -TenantName $TenantName
 	Write-Output "Assigned 'RDS Contributor' role permission to the Service Principal at Tenant for to access the Hostpool"
-
-	#Collecting AzureService Management Api permission
-	$AzureServMgmtApi = Get-AzureRmADServicePrincipal -ApplicationId "797f4846-ba00-4fd7-ba43-dac1f8f63013"
-	$AzureAdServMgmtApi = Get-AzureADServicePrincipal -ObjectId $AzureServMgmtApi.Id.GUID
-	$AzureServMgmtApiResouceAcessObject = New-Object -TypeName "Microsoft.Open.AzureAD.Model.RequiredResourceAccess"
-	$AzureServMgmtApiResouceAcessObject.ResourceAppId = $AzureAdServMgmtApi.AppId
-	foreach ($SerVMgmtAPipermission in $AzureAdServMgmtApi.Oauth2Permissions) {
-		$AzureServMgmtApiResouceAcessObject.ResourceAccess += New-Object -TypeName "Microsoft.Open.AzureAD.Model.ResourceAccess" -ArgumentList $SerVMgmtAPipermission.Id,"Scope"
-	}
-	#Adding Azure Service Management Api required access Permissions to ClientAPP AD Application.
-	Set-AzureADApplication -ObjectId $svcPrincipal.ObjectId -RequiredResourceAccess $AzureServMgmtApiResouceAcessObject -ErrorAction Stop
 }
 
 #$Runbook = Get-AzureRmAutomationRunbook -Name $RunbookName -ResourceGroupName $ResourceGroupName -AutomationAccountName $AutomationAccountName -ErrorAction SilentlyContinue
@@ -383,6 +372,7 @@ function Post-LogAnalyticsData ($customerId,$sharedKey,$body,$logType)
 }
 
 # Specify the name of the record type that you'll be creating
+$TenantUsageLogType = "WVDTenantUsage_CL"
 $TenantScaleLogType = "WVDTenantScale_CL"
 
 # Specify a field with the created time for the records
