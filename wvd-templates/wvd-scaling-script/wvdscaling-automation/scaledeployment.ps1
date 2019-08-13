@@ -260,7 +260,7 @@ Write-Output "Authenticating as standard account for AzureAD. Result: `n$AzureAD
 
 
 #Creating a serviceprincipal and assign the required role assignments at WVD Hostpool level and Subscription level
-$ServicePrincipal = Get-AzureADApplication -SearchString $AzureADApplicationName -ErrorAction SilentlyContinue
+$ServicePrincipal = Get-AzureADApplication -ErrorAction SilentlyContinue | Where-Object { $_.Displayname -eq $AzureADApplicationName }
 if (!$ServicePrincipal)
 {
 	$svcPrincipal = New-AzureADApplication -AvailableToOtherTenants $true -DisplayName $AzureADApplicationName -Verbose
@@ -271,6 +271,7 @@ if (!$ServicePrincipal)
 	Write-Output "Service Principal was created for application"
 	$secpasswd = ConvertTo-SecureString $svcPrincipalCreds.Value -AsPlainText -Force
 	$AppCredentials = New-Object System.Management.Automation.PSCredential ($svcPrincipal.AppId,$secpasswd)
+	Write-Output "Waiting for 45 seconds to active Azure AD Application..."
 	Start-Sleep 45
 	New-AzureRmAutomationCredential -AutomationAccountName $AutomationAccountName -ResourceGroupName $ResourceGroupName -Name $CredentialsAssetName -Value $AppCredentials -Verbose
 	Write-Output "Service principal credentials stored into Azure Automation Account credentials asset"
@@ -294,7 +295,7 @@ if (!$ServicePrincipal)
 #$Runbook = Get-AzureRmAutomationRunbook -Name $RunbookName -ResourceGroupName $ResourceGroupName -AutomationAccountName $AutomationAccountName -ErrorAction SilentlyContinue
 #if($Runbook -eq $null){
 #Creating a runbook and published the basic Scale script file
-$DeploymentStatus = New-AzureRmResourceGroupDeployment -ResourceGroupName $ResourceGroupName -TemplateUri "$ScriptRepoLocation/runbookCreationTemplate.Json" -DeploymentDebugLogLevel All -existingAutomationAccountName $AutomationAccountName -RunbookName $RunbookName -Force -Verbose
+$DeploymentStatus = New-AzureRmResourceGroupDeployment -ResourceGroupName $ResourceGroupName -TemplateUri "$ScriptRepoLocation/runbookCreationTemplate.json" -DeploymentDebugLogLevel All -existingAutomationAccountName $AutomationAccountName -RunbookName $RunbookName -Force -Verbose
 if ($DeploymentStatus.ProvisioningState -eq "Succeeded") {
 	#Check if the Webhook URI exists in automation variable
 	$WebhookURI = Get-AzureRmAutomationVariable -Name "WebhookURI" -ResourceGroupName $ResourceGroupName -AutomationAccountName $AutomationAccountName -ErrorAction SilentlyContinue
