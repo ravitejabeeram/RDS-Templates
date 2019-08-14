@@ -9,9 +9,12 @@
 	PS C:\>Install-Module AzureRm  -AllowClobber
     PS C:\>Install-Module AzureAD  -AllowClobber
 
-.PARAMETER TenantAdminCredentials
+.PARAMETER AzureADApplicationId
  Required
- Provide the tenant admin credentials(User must have Owner or Contributor permission at subscription level)
+ Provide Azure AD Application Id and it must have 'Contributor' role at Subscription, "Azure Service Management" Api Permission and 'RDS Contributor/RDS Owner' at WVD Tenant.
+.PARAMETER AzureAdApplicationSecret
+ Required
+ Provide Azure AD Application Secret value.
 .PARAMETER TenantGroupName
  Required
  Provide the name of the tenant group in the Windows Virtual Desktop deployment.
@@ -59,18 +62,25 @@
  Provide the number of seconds to wait before forcing users to logoff. If 0, don't force users to logoff
 .PARAMETER Location
  Required
- Provide the name of the Location to create azure resources. By default location is "South Central US".
+ Provide the name of the Location to create azure resources.
 .PARAMETER LogOffMessageTitle
  Required
  Provide the Message title sent to a user before forcing logoff
 .PARAMETER LogOffMessageBody
  Required
  Provide the Message body to send to a user before forcing logoff
+ Example: .\scaledeployment.ps1  -AzureADApplicationId "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" -AzureAdApplicationSecret "Youre Azure AD Application Secret" -AADTenantID "Your Azure TenantID" -SubscriptionID "Your Azure SubscriptionID" -TenantGroupName "Name of the WVD Tenant Group Name" ` 
+ -TenantName "Name of the WVD Tenant Name" -HostPoolName "Name of the HostPoolName" -PeakLoadBalancingType "Load balancing type in Peak hours" -MaintenanceTagName "Name of the Tag Name" -RecurrenceInterval "Repeat job every and select the appropriate period of time in minutes (Ex. 15)" ` 
+ -WorkspaceName "Name of the Workspace" -BeginPeakTime "9:00" -EndPeakTime "18:00" -TimeDifference "+5:30" -SessionThresholdPerCPU 6 -MinimumNumberOfRDSH 2 -LimitSecondsToForceLogOffUser 20 –LogOffMessageTitle "System Under Maintenance" -LogOffMessageBody "Please save your work and logoff!" `
+ –Location "Central US"
 
 #>
 param(
-	[Parameter(mandatory = $true)]
-	[pscredential]$TenantAdminCredentials,
+	[Parameter(mandatory = $True)]
+	[string]$AzureADApplicationId,
+
+	[Parameter(mandatory = $True)]
+	[securestring]$AzureADApplicationSecret,
 
 	[Parameter(mandatory = $True)]
 	[string]$TenantGroupName,
@@ -117,8 +127,8 @@ param(
 	[Parameter(mandatory = $True)]
 	[int]$LimitSecondsToForceLogOffUser,
 
-	[Parameter(mandatory = $False)]
-	[string]$Location = "South Central US",
+	[Parameter(mandatory = $True)]
+	[string]$Location,
 
 	[Parameter(mandatory = $True)]
 	[string]$LogOffMessageTitle,
@@ -126,20 +136,24 @@ param(
 	[Parameter(mandatory = $True)]
 	[string]$LogOffMessageBody
 )
-
 #Initializing variables
 $ResourceGroupName = "WVDAutoScaleResourceGroup"
 $AutomationAccountName = "WVDAutoScaleAutomationAccount"
 $JobCollectionName = "WVDAutoScaleSchedulerJobCollection"
 $RunbookName = "WVDAutoScaleRunbook"
 $WebhookName = "WVDAutoScaleWebhook"
-$AzureADApplicationName = "WVDAutoScaleAutomationAccountSvcPrnicipal"
 $CredentialsAssetName = "WVDAutoScaleSvcPrincipalAsset"
-$RequiredModules = @("Az.Accounts","Microsoft.RDInfra.RDPowershell","OMSIngestionAPI","Az.Compute","Az.Resources","Az.Automation","Az.Profile")
+$RequiredModules = @(
+	[pscustomobject]@{ ModuleName = 'AzureRM.Profile'; ModuleVersion = '5.8.3' }
+	[pscustomobject]@{ ModuleName = 'Microsoft.RDInfra.RDPowershell'; ModuleVersion = '1.0.833' }
+	[pscustomobject]@{ ModuleName = 'OMSIngestionAPI'; ModuleVersion = '1.6.0' }
+	[pscustomobject]@{ ModuleName = 'AzureRM.Compute'; ModuleVersion = '5.9.1' }
+	[pscustomobject]@{ ModuleName = 'AzureRM.Resources'; ModuleVersion = '6.7.3' }
+	[pscustomobject]@{ ModuleName = 'AzureRM.Automation'; ModuleVersion = '6.1.1' }
+)
 $RDBrokerURL = "https://rdbroker.wvd.microsoft.com"
-
 $ScriptRepoLocation = "https://raw.githubusercontent.com/Azure/RDS-Templates/ptg-wvdautoscaling-automation/wvd-templates/wvd-scaling-script/wvdscaling-automation"
-
+$ServicePrincipalCredentials = New-Object System.Management.Automation.PSCredential ($AzureADApplicationID,$AzureADApplicationSecret)
 
 #Function to add Required modules to Azure Automation account
 function AddingModules-toAutomationAccount {
@@ -207,26 +221,44 @@ function AddingModules-toAutomationAccount {
 		}
 	}
 }
+
+#Function to check if the module is imported
+function Check-IfModuleIsImported {
+	param(
+		[Parameter(mandatory = $true)]
+		[string]$ResourceGroupName,
+
+		[Parameter(mandatory = $true)]
+		[string]$AutomationAccountName,
+
+		[Parameter(mandatory = $true)]
+		[string]$ModuleName
+	)
+
+	$IsModuleImported = $false
+	while (!$IsModuleImported) {
+		$IsModule = Get-AzureRmAutomationModule -ResourceGroupName $ResourceGroupName -AutomationAccountName $AutomationAccountName -Name $ModuleName -ErrorAction SilentlyContinue
+		if ($IsModule.ProvisioningState -eq "Succeeded") {
+			$IsModuleImported = $true
+			Write-Output "Successfully $ModuleName module imported into Automation Account Modules..."
+		}
+		else {
+			Write-Output "Waiting for to import module $ModuleName into Automation Account Modules ..."
+		}
+	}
+}
 #Authenticate to Azure
 try {
-	$AZAuthentication = Login-AzureRmAccount -Subscription $SubscriptionId -Credential $TenantAdminCredentials
+	$AZAuthentication = Login-AzureRmAccount -Subscription $SubscriptionId -Tenant $AADTenantId -Credential $ServicePrincipalCredentials -ServicePrincipal
 }
 catch {
 	Write-Output "Failed to authenticate Azure: $($_.exception.message)"
+	throw $_
 	exit
 }
 $AzObj = $AZAuthentication | Out-String
 Write-Output "Authenticating as standard account for Azure. Result: `n$AzObj"
-#Authenticate to WVD
-try {
-	$WVDAuthentication = Add-RdsAccount -DeploymentUrl $RDBrokerURL -Credential $TenantAdminCredentials
-}
-catch {
-	Write-Output "Failed to authenticate WVD: $($_.exception.message)"
-	exit
-}
-$WVDObj = $WVDAuthentication | Out-String
-Write-Output "Authenticating as standard account for WVD. Result: `n$WVDObj"
+
 #Convert to local time to UTC time
 $CurrentDateTime = Get-Date
 $CurrentDateTime = $CurrentDateTime.ToUniversalTime()
@@ -236,7 +268,7 @@ $CurrentDateTime = $CurrentDateTime.ToUniversalTime()
 $ResourceGroup = Get-AzureRmResourceGroup -Name $ResourceGroupName -Location $Location -ErrorAction SilentlyContinue
 if (!$ResourceGroup) {
 	New-AzureRmResourceGroup -Name $ResourceGroupName -Location $Location -Force -Verbose
-	Write-Output "Reaource Group was created with name $ResourceGroupName"
+	Write-Output "Resource Group was created with name $ResourceGroupName"
 }
 
 #Check if the Automation Account exist
@@ -246,57 +278,12 @@ if (!$AutomationAccount) {
 	Write-Output "Automation Account was created with name $AutomationAccountName"
 }
 
-# Connect to Azure AD
-try {
-	Write-Output "Connecting to Azure AD"
-	$AzADAuthentication = Connect-AzureAD -Credential $TenantAdminCredentials -Verbose
-}
-catch {
-	Write-Output "Failed to authenticate AzureAD: $($_.exception.message)"
-	exit
-}
-$AzureADObj = $AzADAuthentication | Out-String
-Write-Output "Authenticating as standard account for AzureAD. Result: `n$AzureADObj"
-
-
-#Creating a serviceprincipal and assign the required role assignments at WVD Hostpool level and Subscription level
-$ServicePrincipal = Get-AzureADApplication -ErrorAction SilentlyContinue | Where-Object { $_.Displayname -eq $AzureADApplicationName }
-if (!$ServicePrincipal)
-{
-	$svcPrincipal = New-AzureADApplication -AvailableToOtherTenants $true -DisplayName $AzureADApplicationName -Verbose
-	Write-Output "Dedicated Azure AD application was created for Automation Account"
-	$svcPrincipalCreds = New-AzureADApplicationPasswordCredential -ObjectId $svcPrincipal.ObjectId
-	Write-Output "Created Azure AD Application password credentials"
-	New-AzureRmADServicePrincipal -ApplicationId $svcPrincipal.AppId
-	Write-Output "Service Principal was created for application"
-	$secpasswd = ConvertTo-SecureString $svcPrincipalCreds.Value -AsPlainText -Force
-	$AppCredentials = New-Object System.Management.Automation.PSCredential ($svcPrincipal.AppId,$secpasswd)
-	Write-Output "Waiting for 45 seconds to active Azure AD Application..."
-	Start-Sleep 45
-	New-AzureRmAutomationCredential -AutomationAccountName $AutomationAccountName -ResourceGroupName $ResourceGroupName -Name $CredentialsAssetName -Value $AppCredentials -Verbose
-	Write-Output "Service principal credentials stored into Azure Automation Account credentials asset"
-	New-AzureRmRoleAssignment -ApplicationId $svcPrincipal.AppId -RoleDefinitionName "Contributor"
-	Write-Output "Assigned 'Contributor' role permission to the Service Principal at subscription for to access azure resources"
-	New-RdsRoleAssignment -RoleDefinitionName "RDS Contributor" -ApplicationId $svcPrincipal.AppId -TenantName $TenantName
-	Write-Output "Assigned 'RDS Contributor' role permission to the Service Principal at Tenant for to access the Hostpool"
-
-	#Collecting AzureService Management Api permission
-	$AzureServMgmtApi = Get-AzureRmADServicePrincipal -ApplicationId "797f4846-ba00-4fd7-ba43-dac1f8f63013"
-	$AzureAdServMgmtApi = Get-AzureADServicePrincipal -ObjectId $AzureServMgmtApi.Id.GUID
-	$AzureServMgmtApiResouceAcessObject = New-Object -TypeName "Microsoft.Open.AzureAD.Model.RequiredResourceAccess"
-	$AzureServMgmtApiResouceAcessObject.ResourceAppId = $AzureAdServMgmtApi.AppId
-	foreach ($SerVMgmtAPipermission in $AzureAdServMgmtApi.Oauth2Permissions) {
-		$AzureServMgmtApiResouceAcessObject.ResourceAccess += New-Object -TypeName "Microsoft.Open.AzureAD.Model.ResourceAccess" -ArgumentList $SerVMgmtAPipermission.Id,"Scope"
-	}
-	#Adding Azure Service Management Api required access Permissions to ClientAPP AD Application.
-	Set-AzureADApplication -ObjectId $svcPrincipal.ObjectId -RequiredResourceAccess $AzureServMgmtApiResouceAcessObject -ErrorAction Stop
-}
-
 #$Runbook = Get-AzureRmAutomationRunbook -Name $RunbookName -ResourceGroupName $ResourceGroupName -AutomationAccountName $AutomationAccountName -ErrorAction SilentlyContinue
 #if($Runbook -eq $null){
 #Creating a runbook and published the basic Scale script file
 $DeploymentStatus = New-AzureRmResourceGroupDeployment -ResourceGroupName $ResourceGroupName -TemplateUri "$ScriptRepoLocation/runbookCreationTemplate.json" -DeploymentDebugLogLevel All -existingAutomationAccountName $AutomationAccountName -RunbookName $RunbookName -Force -Verbose
 if ($DeploymentStatus.ProvisioningState -eq "Succeeded") {
+
 	#Check if the Webhook URI exists in automation variable
 	$WebhookURI = Get-AzureRmAutomationVariable -Name "WebhookURI" -ResourceGroupName $ResourceGroupName -AutomationAccountName $AutomationAccountName -ErrorAction SilentlyContinue
 	if (!$WebhookURI) {
@@ -306,34 +293,30 @@ if ($DeploymentStatus.ProvisioningState -eq "Succeeded") {
 		New-AzureRmAutomationVariable -Name "WebhookURI" -Encrypted $false -ResourceGroupName $ResourceGroupName -AutomationAccountName $AutomationAccountName -Value $URIofWebhook
 		Write-Output "Webhook URI stored in Azure Automation Acccount variables"
 		$WebhookURI = Get-AzureRmAutomationVariable -Name "WebhookURI" -ResourceGroupName $ResourceGroupName -AutomationAccountName $AutomationAccountName -ErrorAction SilentlyContinue
+		New-AzureRmAutomationCredential -AutomationAccountName $AutomationAccountName -ResourceGroupName $ResourceGroupName -Name $CredentialsAssetName -Value $ServicePrincipalCredentials -Verbose
+		Write-Output "Service principal credentials stored into Azure Automation Account credentials asset"
 	}
 }
 #}
 # Required modules imported from Automation Account Modules gallery for Scale Script execution
-foreach ($ModuleName in $RequiredModules) {
+foreach ($Module in $RequiredModules) {
 	# Check if the required modules are imported 
-	$ImportedModule = Get-AzureRmAutomationModule -ResourceGroupName $ResourceGroupName -AutomationAccountName $AutomationAccountName -Name $ModuleName -ErrorAction SilentlyContinue
-	if ($ImportedModule -eq $null) {
-		AddingModules-toAutomationAccount -ResourceGroupName $ResourceGroupName -AutomationAccountName $AutomationAccountName -ModuleName $ModuleName
-		$IsModuleImported = $false
-		while (!$IsModuleImported) {
-			$Module = Get-AzureRmAutomationModule -ResourceGroupName $ResourceGroupName -AutomationAccountName $AutomationAccountName -Name $ModuleName -ErrorAction SilentlyContinue
-			if ($Module.ProvisioningState -eq "Succeeded") {
-				$IsModuleImported = $true
-				Write-Output "Successfully '$ModuleName' module imported into Automation Account Modules..."
-			}
-			else {
-				Write-Output "Waiting for to import module '$ModuleName' into Automation Account Modules ..."
-			}
-		}
+	$ImportedModule = Get-AzureRmAutomationModule -ResourceGroupName $ResourceGroupName -AutomationAccountName $AutomationAccountName -Name $Module.ModuleName -ErrorAction SilentlyContinue
+	if ($ImportedModule -eq $Null) {
+		AddingModules-toAutomationAccount -ResourceGroupName $ResourceGroupName -AutomationAccountName $AutomationAccountName -ModuleName $Module.ModuleName
+		Check-IfModuleIsImported -ModuleName $Module.ModuleName -ResourceGroupName $ResourceGroupName -AutomationAccountName $AutomationAccountName
+	}
+	elseif ($ImportedModule.version -ne $Module.ModuleVersion) {
+		AddingModules-toAutomationAccount -ResourceGroupName $ResourceGroupName -AutomationAccountName $AutomationAccountName -ModuleName $Module.ModuleName
+		Check-IfModuleIsImported -ModuleName $Module.ModuleName -ResourceGroupName $ResourceGroupName -AutomationAccountName $AutomationAccountName
 	}
 }
 
 #Check if the log analytic workspace is exist
 $LAWorkspace = Get-AzureRmOperationalInsightsWorkspace | Where-Object { $_.Name -eq $WorkspaceName }
 $WorkSpace = Get-AzureRmOperationalInsightsWorkspaceSharedKeys -ResourceGroupName $LAWorkspace.ResourceGroupName -Name $WorkspaceName
-$SharedKey = $Workspace.PrimarySharedKey
-$CustomerId = (Get-AzureRmOperationalInsightsWorkspace -ResourceGroupName $LAWorkspace.ResourceGroupName -Name $workspaceName).CustomerId.GUID
+$LogAnalyticsPrimaryKey = $Workspace.PrimarySharedKey
+$LogAnalyticsWorkspaceId = (Get-AzureRmOperationalInsightsWorkspace -ResourceGroupName $LAWorkspace.ResourceGroupName -Name $workspaceName).CustomerId.GUID
 
 # Create the function to create the authorization signature
 function Build-Signature ($customerId,$sharedKey,$date,$contentLength,$method,$contentType,$resource)
@@ -403,7 +386,7 @@ $CustomLogWVDTenantScale = @"
     ]
 "@
 
-Post-LogAnalyticsData -customerId $CustomerID -sharedKey $SharedKey -Body ([System.Text.Encoding]::UTF8.GetBytes($CustomLogWVDTenantScale)) -logType $TenantScaleLogType
+Post-LogAnalyticsData -customerId $LogAnalyticsWorkspaceId -sharedKey $LogAnalyticsPrimaryKey -Body ([System.Text.Encoding]::UTF8.GetBytes($CustomLogWVDTenantScale)) -logType $TenantScaleLogType
 
 #Creating Azure Scheduler job collection and job
 $RequestBody = @{
