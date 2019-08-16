@@ -210,7 +210,7 @@ function AddingModules-toAutomationAccount {
 			# Find the actual blob storage location of the module
 			do {
 				$ActualUrl = $ModuleContentUrl
-				$ModuleContentUrl = (Invoke-WebRequest -Uri $ModuleContentUrl -MaximumRedirection 0 -ErrorAction Ignore).Headers.Location
+				$ModuleContentUrl = (Invoke-WebRequest -Uri $ModuleContentUrl -MaximumRedirection 0 -UseBasicParsing -ErrorAction Ignore).Headers.Location
 			} while ($ModuleContentUrl -ne $Null)
 
 			New-AzureRmAutomationModule `
@@ -257,7 +257,7 @@ catch {
 	exit
 }
 $AzObj = $AZAuthentication | Out-String
-Write-Output "Authenticating as standard account for Azure. Result: `n$AzObj"
+Write-Output "Authenticating as service principal for Azure. Result: `n$AzObj"
 
 #Convert to local time to UTC time
 $CurrentDateTime = Get-Date
