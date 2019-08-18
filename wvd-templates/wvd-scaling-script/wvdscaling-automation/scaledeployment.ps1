@@ -257,7 +257,7 @@ catch {
 	exit
 }
 $AzObj = $AZAuthentication | Out-String
-Write-Output "Authenticating as service principal for Azure. Result: `n$AzObj"
+Write-Output "Azure authentication successfully Done. Result: `n$AzObj"
 
 #Convert to local time to UTC time
 $CurrentDateTime = Get-Date
@@ -399,8 +399,8 @@ $RequestBody = @{
 	"HostPoolName" = $HostPoolName;
 	"peakLoadBalancingType" = $peakLoadBalancingType;
 	"MaintenanceTagName" = $MaintenanceTagName;
-	"LogAnalyticsWorkspaceId" = $CustomerId;
-	"LogAnalyticsPrimaryKey" = $SharedKey;
+	"LogAnalyticsWorkspaceId" = $LogAnalyticsWorkspaceId;
+	"LogAnalyticsPrimaryKey" = $LogAnalyticsPrimaryKey;
 	"CredentialAssetName" = $CredentialsAssetName;
 	"BeginPeakTime" = $BeginPeakTime;
 	"EndPeakTime" = $EndPeakTime;
