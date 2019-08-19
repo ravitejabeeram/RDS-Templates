@@ -802,6 +802,9 @@ function OffPeakUserSessionUsage-SpinUpSessionHost
 		Write-Output "HostpoolName:$HostpoolName, NumberofRunninghosts:$NumberOfRunningHost"
 		$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "HostpoolName:$HostpoolName, NumberofRunninghosts:$NumberOfRunningHost" }
 		Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
+		Write-Output "End WVD Tenant Scale Optimization."
+		$LogMessage = @{ hostpoolName_s = $HostpoolName; logmessage_s = "End WVD Tenant Scale Optimization." }
+		Add-LogEntry -LogMessageObj $LogMessage -LogAnalyticsWorkspaceId $LogAnalyticsWorkspaceId -LogAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logType "WVDTenantScale_CL" -TimeDifferenceInHours $TimeDifference
 		break
 	}
 	else {

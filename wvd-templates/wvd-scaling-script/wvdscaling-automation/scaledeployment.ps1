@@ -12,7 +12,7 @@
 .PARAMETER AzureADApplicationId
  Required
  Provide Azure AD Application Id and it must have 'Contributor' role at Subscription, "Azure Service Management" Api Permission and 'RDS Contributor/RDS Owner' at WVD Tenant.
-.PARAMETER AzureAdApplicationSecret
+.PARAMETER AzureADApplicationSecret
  Required
  Provide Azure AD Application Secret value.
 .PARAMETER TenantGroupName
@@ -38,13 +38,13 @@
  Provide Subscription Id of the Azure.
 .PARAMETER BeginPeakTime
  Required
- Provide begin of the peak usage time
+ Provide begin of the peak usage time.
 .PARAMETER EndPeakTime
  Required
- Provide end of the peak usage time
+ Provide end of the peak usage time.
 .PARAMETER TimeDifference
  Required
- Provide the Time difference between local time and UTC, in hours(Example: India Standard Time is +5:30)
+ Provide the Time difference between local time and UTC, in hours(Example: India Standard Time is +5:30).
 .PARAMETER SessionThresholdPerCPU
  Required
  Provide the Maximum number of sessions per CPU threshold used to determine when a new RDSH server needs to be started.
@@ -53,23 +53,23 @@
  Provide the Minimum number of host pool VMs to keep running during off-peak usage time.
 .PARAMETER MaintenanceTagName
  Required
- Provide the name of the MaintenanceTagName
+ Provide the name of the MaintenanceTagName.
 .PARAMETER WorkspaceName
  Required
- Provide the name of the WorkspaceName
+ Provide the name of the WorkspaceName.
 .PARAMETER LimitSecondsToForceLogOffUser
  Required
- Provide the number of seconds to wait before forcing users to logoff. If 0, don't force users to logoff
+ Provide the number of seconds to wait before forcing users to logoff. If 0, don't force users to logoff.
 .PARAMETER Location
  Required
  Provide the name of the Location to create azure resources.
 .PARAMETER LogOffMessageTitle
  Required
- Provide the Message title sent to a user before forcing logoff
+ Provide the Message title sent to a user before forcing logoff.
 .PARAMETER LogOffMessageBody
  Required
- Provide the Message body to send to a user before forcing logoff
- Example: .\scaledeployment.ps1  -AzureADApplicationId "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" -AzureAdApplicationSecret "Youre Azure AD Application Secret" -AADTenantID "Your Azure TenantID" -SubscriptionID "Your Azure SubscriptionID" -TenantGroupName "Name of the WVD Tenant Group Name" ` 
+ Provide the Message body to send to a user before forcing logoff.
+ Example: .\scaledeployment.ps1  -AzureADApplicationId "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" -AzureAdApplicationSecret "Secret configured for Azure ApplicationId" -AADTenantID "Your Azure TenantID" -SubscriptionID "Your Azure SubscriptionID" -TenantGroupName "Name of the WVD Tenant Group Name" ` 
  -TenantName "Name of the WVD Tenant Name" -HostPoolName "Name of the HostPoolName" -PeakLoadBalancingType "Load balancing type in Peak hours" -MaintenanceTagName "Name of the Tag Name" -RecurrenceInterval "Repeat job every and select the appropriate period of time in minutes (Ex. 15)" ` 
  -WorkspaceName "Name of the Workspace" -BeginPeakTime "9:00" -EndPeakTime "18:00" -TimeDifference "+5:30" -SessionThresholdPerCPU 6 -MinimumNumberOfRDSH 2 -LimitSecondsToForceLogOffUser 20 –LogOffMessageTitle "System Under Maintenance" -LogOffMessageBody "Please save your work and logoff!" `
  –Location "Central US"
