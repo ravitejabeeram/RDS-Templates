@@ -1,0 +1,108 @@
+{
+ "properties": {
+  "displayName": "Use case Initiative",
+  "policyType": "Custom",
+  "description": "Use case Initiative",
+  "metadata": {
+   "category": "General",
+   "createdBy": "98200897-e81a-4d4d-8361-0b50477c7cb5",
+   "createdOn": "2021-04-30T17:54:57.2975265Z",
+   "updatedBy": "26943458-4e5a-4d43-9cbf-8715f4f9c3b0",
+   "updatedOn": "2021-05-14T20:53:52.7215207Z"
+  },
+  "parameters": {
+   "tag1": {
+    "type": "string",
+    "metadata": {
+     "displayName": "Tag Name1",
+     "description": null
+    },
+    "allowedValues": [
+     "subscription",
+     "region"
+    ],
+    "defaultValue": "subscription"
+   },
+   "tag2": {
+    "type": "string",
+    "metadata": {
+     "displayName": "Tag Name2",
+     "description": null
+    },
+    "allowedValues": [
+     "tier",
+     "env"
+    ],
+    "defaultValue": "tier"
+   },
+   "tag3": {
+    "type": "string",
+    "metadata": {
+     "displayName": "Tag Name3"
+    },
+    "allowedValues": [
+     "subscription",
+     "region"
+    ],
+    "defaultValue": "region"
+   },
+   "tag4": {
+    "type": "string",
+    "metadata": {
+     "displayName": "Tag Name4"
+    },
+    "allowedValues": [
+     "tier",
+     "env"
+    ],
+    "defaultValue": "env"
+   }
+  },
+  "policyDefinitions": [
+   {
+    "policyDefinitionReferenceId": "Inherit a tag from the subscription_1",
+    "policyDefinitionId": "/providers/Microsoft.Authorization/policyDefinitions/b27a0cbd-a167-4dfa-ae64-4337be671140",
+    "parameters": {
+     "tagName": {
+      "value": "[parameters('tag1')]"
+     }
+    },
+    "groupNames": []
+   },
+   {
+    "policyDefinitionReferenceId": "Inherit a tag from the resource group if missing_1",
+    "policyDefinitionId": "/providers/Microsoft.Authorization/policyDefinitions/ea3f2387-9b95-492a-a190-fcdc54f7b070",
+    "parameters": {
+     "tagName": {
+      "value": "[parameters('tag2')]"
+     }
+    },
+    "groupNames": []
+   },
+   {
+    "policyDefinitionReferenceId": "Inherit a tag from the subscription_2",
+    "policyDefinitionId": "/providers/Microsoft.Authorization/policyDefinitions/b27a0cbd-a167-4dfa-ae64-4337be671140",
+    "parameters": {
+     "tagName": {
+      "value": "[parameters('tag3')]"
+     }
+    },
+    "groupNames": []
+   },
+   {
+    "policyDefinitionReferenceId": "Inherit a tag from the resource group if missing_2",
+    "policyDefinitionId": "/providers/Microsoft.Authorization/policyDefinitions/ea3f2387-9b95-492a-a190-fcdc54f7b070",
+    "parameters": {
+     "tagName": {
+      "value": "[parameters('tag4')]"
+     }
+    },
+    "groupNames": []
+   }
+  ],
+  "policyDefinitionGroups": []
+ },
+ "id": "/providers/Microsoft.Management/managementGroups/NRmgmt/providers/Microsoft.Authorization/policySetDefinitions/4225db4f88984e95a9b8cf36",
+ "type": "Microsoft.Authorization/policySetDefinitions",
+ "name": "4225db4f88984e95a9b8cf36"
+}
